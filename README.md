@@ -14,7 +14,7 @@ cd turtle_ws/src
 ## 2. Clone the repository and Build
 
 ```
-git https://github.com/Aroopjoscustom-dwa-planner.git .
+git clone https://github.com/Aroopjosy/custom-dwa-planner.git .
 cd ..
 colcon build --symlink-install
 ```
