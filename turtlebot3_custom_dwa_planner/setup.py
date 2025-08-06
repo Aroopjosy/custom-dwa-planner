@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = 'turtlebot3_custom_dwa_planner'
 
@@ -23,7 +25,14 @@ setup(
             'odom_node = turtlebot3_custom_dwa_planner.odom_node:main',
             'dwa_planner = turtlebot3_custom_dwa_planner.dwa_planner_node:main',
             'test_node = turtlebot3_custom_dwa_planner.test_dwa_node:main',
+            'planner = turtlebot3_custom_dwa_planner.planner:main',
 
         ],
     },
+
+    data_files=[
+        # ... Other data files
+        # Include all launch files.
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
+    ]
 )
