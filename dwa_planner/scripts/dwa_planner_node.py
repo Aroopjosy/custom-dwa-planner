@@ -1,206 +1,212 @@
 #!/usr/bin/env python3
-import rclpy
 import math
-import random
 import numpy as np
+
+import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist, PoseStamped
 from tf_transformations import euler_from_quaternion
-from visualization_msgs.msg import Marker
-from geometry_msgs.msg import Point
+from visualization_msgs.msg import Marker, MarkerArray
 
+# === Local imports ===
 
-class DWAPlanner(Node):
+from dwa_planner.motion_model import calc_dynamic_window
+from dwa_planner.visualization import (make_goal_marker, 
+                                        make_path_marker, 
+                                        make_traj_marker,
+                                        make_candidate_markers 
+                                        )
+from dwa_planner.dwa_core import ( clearance_score, 
+                                  heading_score, 
+                                  path_smoothness_score, 
+                                  stopping_feasible, 
+                                  trajectory_clearance,
+                                   velocity_score,
+                                    simulate_trajectory,
+                                    )
+
+class DWAPlannerNode(Node):
+
     def __init__(self):
-        super().__init__('dwa_planner')
+        super().__init__("dwa_planner")
 
-        # Goal input
-        self.goal_x = float(input("Enter goal X: "))
-        self.goal_y = float(input("Enter goal Y: "))
-        self.goal_reached = False
+            # --- Robot Limits ---
+        self.v_max         = 0.3
+        self.v_min         = 0.05
+        self.omega_max     = 2.0
+        self.omega_min     = -2.0
+        self.a_max         = 1.0
+        self.alpha_max     = 3.0
+        self.robot_radius  = 0.30
+        self.safety_margin = 0.10
+        self.effective_radius = self.robot_radius + self.safety_margin
 
-        # ROS data
-        self.odom_data = None
-        self.scan_data = None
+        # --- DWA Parameters ---
+        self.dt_control   = 0.2
+        self.dt_sim       = 0.1
+        self.predict_time = 2.2
+        self.v_samples    = 15
+        self.w_samples    = 36
 
-        # Parameters
-        self.max_speed = 0.15
-        self.max_turn = 2.5
-        self.step_time = 0.1
-        self.num_paths = 30
-        self.robot_radius = 0.105
-        self.safety_margin = 0.05
+        # --- Weights (all positive, features normalized 0..1) ---
+        self.w_heading   = 4.0
+        self.w_clearance = -5.0
+        self.w_velocity  = 2.0
+        self.w_smooth    = 3.0
 
-
-        # Subscribers & Publishers
-        self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.marker_pub = self.create_publisher(Marker, '/visualization_marker', 10)
-        self.path_history = []  # Store robot’s previous positions
-
-
-        # Main timer loop
-        self.create_timer(self.step_time, self.movement_loop)
-        self.get_logger().info("DWA Planner node started.")
-
-    def odom_callback(self, msg):
-        self.odom_data = msg
-
-    def scan_callback(self, msg):
-        self.scan_data = msg
-
-    def predict_path(self, speed, turn_rate):
-        if self.odom_data is None:
-            return []
-
-        x = self.odom_data.pose.pose.position.x
-        y = self.odom_data.pose.pose.position.y
-        orientation = self.odom_data.pose.pose.orientation
-        _, _, yaw = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
-
-        path = []
-        for _ in range(100):
-            yaw += turn_rate * self.step_time
-            x += speed * math.cos(yaw) * self.step_time
-            y += speed * math.sin(yaw) * self.step_time
-            path.append((x, y))
-
-        return path
-
-    def check_for_collisions(self, path):
-        if self.scan_data is None:
-            return -float('inf')
+        self.max_clearance  = 0.4
+        self.goal_tolerance = 0.1
+        self.yaw_tolerance  = 0.1
 
 
-        for x, y in path:
-            distance = math.sqrt(x**2 + y**2)
-            angle = math.atan2(y, x)
-            index = int((angle + math.pi) / (2 * math.pi) * len(self.scan_data.ranges))
-            index = max(0, min(len(self.scan_data.ranges) - 1, index))
+        # --- State ---
+        self.x, self.y, self.yaw = 0.0, 0.0, 0.0
+        self.v, self.omega = 0.0, 0.0
+        self.prev_v, self.prev_w = 0.0, 0.0
+        self.goal = None
+        self.obstacles = []
+        self.path_points = []
 
-            if distance < self.scan_data.ranges[index] - self.robot_radius + self.safety_margin:
-                return -100000  # Collision penalty
+        # --- ROS Interfaces ---
+        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.goal_sub = self.create_subscription(PoseStamped, '/goal_pose', self.goal_callback, 10)
+        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
 
-        return 0  # No collision
+        self.cmd_pub   = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.goal_pub  = self.create_publisher(Marker, "/goal_marker", 10)
+        self.path_pub  = self.create_publisher(Marker, "/robot_path_marker", 10)
+        self.traj_pub  = self.create_publisher(Marker, "/best_path_marker", 10)
+        self.candidate_pub = self.create_publisher(MarkerArray, "/candidate_trajs", 10)
 
-    def choose_best_path(self, paths):
-        if self.odom_data is None:
-            return 0.0, 0.0
 
-        cx = self.odom_data.pose.pose.position.x
-        cy = self.odom_data.pose.pose.position.y
-        orientation = self.odom_data.pose.pose.orientation
-        _, _, yaw = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])
+        self.timer = self.create_timer(self.dt_control, self.control_loop)
 
-        dist_to_goal = math.hypot(self.goal_x - cx, self.goal_y - cy)
-        if dist_to_goal < 0.05:
-            if not self.goal_reached:
-                self.goal_reached = True
-                self.get_logger().info(f"Goal reached at ({self.goal_x:.2f}, {self.goal_y:.2f})!")
-            return 0.0, 0.0
+        self.get_logger().info("✅ DWA Planner Node started...")
 
-        best_score = float('-inf')
-        best_cmd = (0.05, 0.0)
 
-        for speed, turn, path in paths:
-            if not path:
-                continue
+    def odom_callback(self, msg: Odometry):
+        self.x = msg.pose.pose.position.x
+        self.y = msg.pose.pose.position.y
+        q = msg.pose.pose.orientation
+        _, _, self.yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
 
-            gx, gy = self.goal_x, self.goal_y
-            px, py = path[-1]
+        self.v     = msg.twist.twist.linear.x
+        self.omega = msg.twist.twist.angular.z
 
-            dist_score = -math.hypot(px - gx, py - gy) * 5
-            angle_diff = abs(math.atan2(gy - cy, gx - cx) - yaw)
-            heading_score = -angle_diff * 2
-            collision_score = self.check_for_collisions(path)
-            smoothness_score = -0.1 * abs(turn)
+        self.path_points.append((self.x, self.y))
+        marker =  make_path_marker(self.path_points, self.get_clock().now().to_msg(), frame_id="map")
+        self.path_pub.publish(marker)
 
-            total = dist_score + heading_score + collision_score + smoothness_score
-            if total > best_score:
-                best_score = total
-                best_cmd = (speed, turn)
+    def goal_callback(self, msg: PoseStamped):
+        gx, gy = msg.pose.position.x, msg.pose.position.y
+        q = msg.pose.orientation
+        _, _, gyaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
+        self.goal = (gx, gy, gyaw)
 
-        return best_cmd
+        self.path_points.clear()
+        self.get_logger().info(f"🎯 Goal set: x={gx:.2f}, y={gy:.2f}, yaw={gyaw:.2f}")
 
-    def generate_paths(self):
-        for _ in range(self.num_paths):
-            speed = random.uniform(0.0, self.max_speed)
-            turn = random.uniform(-self.max_turn, self.max_turn)
-            path = self.predict_path(speed, turn)
-            yield (speed, turn, path)
+        marker =  make_goal_marker(self.goal, self.get_clock().now().to_msg(), frame_id="map")
+        self.goal_pub.publish(marker)
 
-    def movement_loop(self):
-        if self.odom_data is None or self.scan_data is None or self.goal_reached:
+    def scan_callback(self, msg: LaserScan):
+        self.obstacles.clear()
+        angle = msg.angle_min
+        for r in msg.ranges:
+            if 0.05 < r < msg.range_max and math.isfinite(r):
+                ox = self.x + r * math.cos(self.yaw + angle)
+                oy = self.y + r * math.sin(self.yaw + angle)
+                self.obstacles.append((ox, oy))
+            angle += msg.angle_increment
+
+
+    def control_loop(self):
+        if self.goal is None:
             return
 
-        paths = list(self.generate_paths())
-        speed, turn = self.choose_best_path(paths)
+        gx, gy, gyaw = self.goal
+        if math.hypot(gx - self.x, gy - self.y) < self.goal_tolerance:
+            self.cmd_pub.publish(Twist())
+            self.prev_v, self.prev_w = 0.0, 0.0
+            self.get_logger().info("🏁 Goal Reached.")
+            return
 
-        twist = Twist()
-        twist.linear.x = speed
-        twist.angular.z = turn
-        self.cmd_pub.publish(twist)
-        self.publish_markers()
+        # 1) Dynamic Window
+        v_low, v_high, w_low, w_high = calc_dynamic_window(
+            self.v, self.omega,
+            self.v_min, self.v_max,
+            self.omega_min, self.omega_max,
+            self.a_max, self.alpha_max,
+            self.dt_control
+        )
+        vs = np.linspace(v_low, v_high, max(1, self.v_samples))
+        ws = np.linspace(w_low, w_high, max(1, self.w_samples))
+
+        # 2) Evaluate trajectories
+        best_score, best_v, best_w, best_traj, candidates = -1e9, 0.0, 0.0, [], []
+        for v in vs:
+            for w in ws:
+                traj = simulate_trajectory(
+                    self.x, self.y, self.yaw, v, w, self.dt_sim, self.predict_time
+                )
+                clearance = trajectory_clearance(traj, self.obstacles, self.effective_radius)
+                if clearance < 0.02 or not stopping_feasible(v, self.a_max, self.dt_control, clearance, self.effective_radius):
+                    continue
+                
+                candidates.append(traj)
+                score_heading = self.w_heading * heading_score(traj, self.goal)
+                score_clearance = self.w_clearance * clearance_score(clearance, self.max_clearance)
+                score_velocity = self.w_velocity * velocity_score(v, self.v_min, self.v_max)
+                score_smooth   = self.w_smooth * path_smoothness_score(v, w, self.prev_v, self.prev_w, self.v_max, self.omega_max)
+
+                score = score_heading + score_clearance + score_velocity + score_smooth
+
+                self.get_logger().info(
+    f"v={self.v:.2f}, w={self.omega:.2f} | "
+    f"H={score_heading:.2f}, C={score_clearance:.2f}, V={score_velocity:.2f}, S={score_smooth:.2f} "
+    f"=> Total={score:.2f}"
+)
 
 
-    def publish_markers(self):
-        # === Red Dot Marker (Goal Position) ===
-        goal_marker = Marker()
-        goal_marker.header.frame_id = "map"
-        goal_marker.header.stamp = self.get_clock().now().to_msg()
-        goal_marker.ns = "goal"
-        goal_marker.id = 0
-        goal_marker.type = Marker.SPHERE
-        goal_marker.action = Marker.ADD
-        goal_marker.pose.position.x = self.goal_x
-        goal_marker.pose.position.y = self.goal_y
-        goal_marker.pose.position.z = 0.0
-        goal_marker.scale.x = 0.1
-        goal_marker.scale.y = 0.1
-        goal_marker.scale.z = 0.1
-        goal_marker.color.r = 1.0
-        goal_marker.color.g = 0.0
-        goal_marker.color.b = 0.0
-        goal_marker.color.a = 1.0
 
-        self.marker_pub.publish(goal_marker)
+                if score > best_score:
+                    best_score, best_v, best_w, best_traj = score, float(v), float(w), traj
 
-        # === Green Line Strip Marker (Path History) ===
-        if self.odom_data:
-            x = self.odom_data.pose.pose.position.x
-            y = self.odom_data.pose.pose.position.y
-            pt = Point(x=x, y=y, z=0.0)
-            self.path_history.append(pt)
-            if len(self.path_history) > 1000:
-                self.path_history.pop(0)
+        cmd = Twist()
+        if best_score <= -1e8:
+            self.get_logger().warn("⚠️ No valid trajectory, rotating in place.")
+            cmd.angular.z = 0.3
+        else:
+            cmd.linear.x = best_v
+            cmd.angular.z = best_w
 
-            path_marker = Marker()
-            path_marker.header.frame_id = "map"
-            path_marker.header.stamp = self.get_clock().now().to_msg()
-            path_marker.ns = "path"
-            path_marker.id = 1
-            path_marker.type = Marker.LINE_STRIP
-            path_marker.action = Marker.ADD
-            path_marker.scale.x = 0.03
-            path_marker.color.r = 0.0
-            path_marker.color.g = 1.0
-            path_marker.color.b = 0.0
-            path_marker.color.a = 1.0
-            path_marker.points = self.path_history
-            self.marker_pub.publish(path_marker)
+            self.prev_v, self.prev_w = best_v, best_w
 
+        self.cmd_pub.publish(cmd)
+
+        best_traj = simulate_trajectory(self.x, self.y, self.yaw, best_v, best_w, self.dt_sim, self.predict_time)
+        
+        if candidates:
+            candidate_markers = make_candidate_markers(
+                candidates, self.get_clock().now().to_msg(), frame_id="map"
+            )
+            self.candidate_pub.publish(candidate_markers)
+
+        if best_traj:
+            best_marker = make_traj_marker(
+                best_traj, self.get_clock().now().to_msg(), frame_id="map"
+            )
+            self.traj_pub.publish(best_marker)
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = DWAPlanner()
+    node = DWAPlannerNode()
     rclpy.spin(node)
-    node.destroy_node()
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

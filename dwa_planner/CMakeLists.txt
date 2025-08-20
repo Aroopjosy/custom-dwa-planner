@@ -11,11 +11,22 @@ find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+# find_package(tf_transformations REQUIRED)
+
+
+
+ament_python_install_package(${PROJECT_NAME})
+
+
+
 # Install Python executables
 install(PROGRAMS
   scripts/dwa_planner_node.py
-  # scripts/test_dwa_node.py
-  scripts/new_planner.py
+  scripts/dwa_node.py
+  scripts/new_dwa_planner.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -23,6 +34,8 @@ install(PROGRAMS
 # Install launch files.
 install(DIRECTORY
   launch
+  maps
+  rviz
   DESTINATION share/${PROJECT_NAME}/
 )
 
