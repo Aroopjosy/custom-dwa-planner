@@ -33,30 +33,35 @@ class DWAPlannerNode(Node):
         super().__init__("dwa_planner")
 
             # --- Robot Limits ---
-        self.v_max         = 0.3
-        self.v_min         = 0.05
-        self.omega_max     = 2.0
-        self.omega_min     = -2.0
-        self.a_max         = 1.0
-        self.alpha_max     = 3.0
-        self.robot_radius  = 0.30
+        self.v_max         = 0.5
+        self.v_min         = 0.0
+        self.omega_max     = 1.82
+        self.omega_min     = -1.82
+        self.a_max         = 1.5
+        self.alpha_max     = 2.5
+        self.robot_radius  = 0.20
         self.safety_margin = 0.10
         self.effective_radius = self.robot_radius + self.safety_margin
 
         # --- DWA Parameters ---
-        self.dt_control   = 0.2
+        self.dt_control   = 0.1
         self.dt_sim       = 0.1
-        self.predict_time = 2.2
-        self.v_samples    = 15
-        self.w_samples    = 36
+        self.predict_time = 3.0
+        self.v_samples    = 10
+        self.w_samples    = 20
 
         # --- Weights (all positive, features normalized 0..1) ---
-        self.w_heading   = 4.0
-        self.w_clearance = -5.0
-        self.w_velocity  = 2.0
-        self.w_smooth    = 3.0
+        # self.w_heading   = 0.1
+        # self.w_clearance = 2.0
+        # self.w_velocity  = 0.2
+        # self.w_smooth    = 0.2
 
-        self.max_clearance  = 0.4
+        self.w_heading   = 0.30
+        self.w_clearance = 0.50
+        self.w_velocity  = 0.10
+        self.w_smooth    = 0.10
+
+        self.max_clearance  = 0.2
         self.goal_tolerance = 0.1
         self.yaw_tolerance  = 0.1
 
@@ -155,21 +160,21 @@ class DWAPlannerNode(Node):
                 if clearance < 0.02 or not stopping_feasible(v, self.a_max, self.dt_control, clearance, self.effective_radius):
                     continue
                 
-                candidates.append(traj)
-                score_heading = self.w_heading * heading_score(traj, self.goal)
+                score_heading   = self.w_heading * heading_score(traj, self.goal)
                 score_clearance = self.w_clearance * clearance_score(clearance, self.max_clearance)
-                score_velocity = self.w_velocity * velocity_score(v, self.v_min, self.v_max)
-                score_smooth   = self.w_smooth * path_smoothness_score(v, w, self.prev_v, self.prev_w, self.v_max, self.omega_max)
+                score_velocity  = self.w_velocity * velocity_score(v, self.v_min, self.v_max)
+                score_smooth    = self.w_smooth * path_smoothness_score(v, w, self.prev_v, self.prev_w, self.v_max, self.omega_max)
 
                 score = score_heading + score_clearance + score_velocity + score_smooth
+
+                candidates.append((traj, score))
+
 
                 self.get_logger().info(
     f"v={self.v:.2f}, w={self.omega:.2f} | "
     f"H={score_heading:.2f}, C={score_clearance:.2f}, V={score_velocity:.2f}, S={score_smooth:.2f} "
     f"=> Total={score:.2f}"
 )
-
-
 
                 if score > best_score:
                     best_score, best_v, best_w, best_traj = score, float(v), float(w), traj
@@ -184,14 +189,19 @@ class DWAPlannerNode(Node):
 
             self.prev_v, self.prev_w = best_v, best_w
 
+        # cmd.linear.x = best_v
+        # cmd.angular.z = best_w
+        # self.prev_v, self.prev_w = best_v, best_w
         self.cmd_pub.publish(cmd)
 
         best_traj = simulate_trajectory(self.x, self.y, self.yaw, best_v, best_w, self.dt_sim, self.predict_time)
         
         if candidates:
+           
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            top_candidates = [traj for traj, _ in candidates[:]]
             candidate_markers = make_candidate_markers(
-                candidates, self.get_clock().now().to_msg(), frame_id="map"
-            )
+                    top_candidates, self.get_clock().now().to_msg(), frame_id="map" )
             self.candidate_pub.publish(candidate_markers)
 
         if best_traj:
