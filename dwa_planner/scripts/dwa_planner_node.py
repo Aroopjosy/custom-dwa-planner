@@ -35,8 +35,8 @@ class DWAPlannerNode(Node):
             # --- Robot Limits ---
         self.v_max         = 0.5
         self.v_min         = 0.0
-        self.omega_max     = 1.82
-        self.omega_min     = -1.82
+        self.omega_max     =  2.84 #1.82
+        self.omega_min     = -2.84 #-1.82
         self.a_max         = 1.5
         self.alpha_max     = 2.5
         self.robot_radius  = 0.20
@@ -44,22 +44,18 @@ class DWAPlannerNode(Node):
         self.effective_radius = self.robot_radius + self.safety_margin
 
         # --- DWA Parameters ---
-        self.dt_control   = 0.1
-        self.dt_sim       = 0.1
+        self.dt_control   = 0.5
+        self.dt_sim       = 0.3
         self.predict_time = 3.0
-        self.v_samples    = 10
-        self.w_samples    = 20
+        self.v_samples    = 7
+        self.w_samples    = 15
 
         # --- Weights (all positive, features normalized 0..1) ---
-        # self.w_heading   = 0.1
-        # self.w_clearance = 2.0
-        # self.w_velocity  = 0.2
-        # self.w_smooth    = 0.2
 
-        self.w_heading   = 0.30
+        self.w_heading   = 0.10
         self.w_clearance = 0.50
-        self.w_velocity  = 0.10
-        self.w_smooth    = 0.10
+        self.w_velocity  = 0.20
+        self.w_smooth    = 0.20
 
         self.max_clearance  = 0.2
         self.goal_tolerance = 0.1
@@ -86,7 +82,7 @@ class DWAPlannerNode(Node):
         self.candidate_pub = self.create_publisher(MarkerArray, "/candidate_trajs", 10)
 
 
-        self.timer = self.create_timer(self.dt_control, self.control_loop)
+        self.timer = self.create_timer(0.1, self.control_loop)
 
         self.get_logger().info("✅ DWA Planner Node started...")
 
@@ -199,7 +195,7 @@ class DWAPlannerNode(Node):
         if candidates:
            
             candidates.sort(key=lambda x: x[1], reverse=True)
-            top_candidates = [traj for traj, _ in candidates[:]]
+            top_candidates = [traj for traj, _ in candidates[:10]]
             candidate_markers = make_candidate_markers(
                     top_candidates, self.get_clock().now().to_msg(), frame_id="map" )
             self.candidate_pub.publish(candidate_markers)
