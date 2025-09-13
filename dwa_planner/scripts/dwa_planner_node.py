@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import math
 import numpy as np
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -37,29 +38,29 @@ class DWAPlannerNode(Node):
         self.v_min         = 0.0
         self.omega_max     =  2.84 #1.82
         self.omega_min     = -2.84 #-1.82
-        self.a_max         = 1.5
+        self.a_max         = 2.5
         self.alpha_max     = 2.5
-        self.robot_radius  = 0.20
+        self.robot_radius  = 0.15
         self.safety_margin = 0.10
         self.effective_radius = self.robot_radius + self.safety_margin
 
         # --- DWA Parameters ---
-        self.dt_control   = 0.5
-        self.dt_sim       = 0.3
+        self.dt_control   = 0.2
+        self.dt_sim       = 0.1
         self.predict_time = 3.0
         self.v_samples    = 7
-        self.w_samples    = 15
+        self.w_samples    = 5
 
         # --- Weights (all positive, features normalized 0..1) ---
 
-        self.w_heading   = 0.10
-        self.w_clearance = 0.50
-        self.w_velocity  = 0.20
-        self.w_smooth    = 0.20
+        self.w_heading   = 0.06
+        self.w_clearance = 0.65
+        self.w_velocity  = 0.14
+        self.w_smooth    = 0.15
 
-        self.max_clearance  = 0.2
-        self.goal_tolerance = 0.1
-        self.yaw_tolerance  = 0.1
+        self.max_clearance  = 0.1
+        self.goal_tolerance = 0.2
+        self.yaw_tolerance  = 0.2
 
 
         # --- State ---
@@ -69,6 +70,7 @@ class DWAPlannerNode(Node):
         self.goal = None
         self.obstacles = []
         self.path_points = []
+        self.last_log_time = 0.0   # for throttling logs
 
         # --- ROS Interfaces ---
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
@@ -115,20 +117,30 @@ class DWAPlannerNode(Node):
     def scan_callback(self, msg: LaserScan):
         self.obstacles.clear()
         angle = msg.angle_min
+        min_dist = float("inf")
         for r in msg.ranges:
             if 0.05 < r < msg.range_max and math.isfinite(r):
                 ox = self.x + r * math.cos(self.yaw + angle)
                 oy = self.y + r * math.sin(self.yaw + angle)
                 self.obstacles.append((ox, oy))
+
+                if r < min_dist:
+                    min_dist = r
             angle += msg.angle_increment
+        # if min_dist < float("inf"):
+        #     self.get_logger().info(f"Nearest obstacle: {min_dist:.2f} m")
+
 
 
     def control_loop(self):
         if self.goal is None:
             return
-
         gx, gy, gyaw = self.goal
-        if math.hypot(gx - self.x, gy - self.y) < self.goal_tolerance:
+        # Position error
+        dist_err = math.hypot(gx - self.x, gy - self.y)
+        # Orientation error
+        yaw_err = math.atan2(math.sin(gyaw - self.yaw), math.cos(gyaw - self.yaw))
+        if dist_err < self.goal_tolerance: #and abs(yaw_err) < self.yaw_tolerance:
             self.cmd_pub.publish(Twist())
             self.prev_v, self.prev_w = 0.0, 0.0
             self.get_logger().info("🏁 Goal Reached.")
@@ -166,11 +178,23 @@ class DWAPlannerNode(Node):
                 candidates.append((traj, score))
 
 
-                self.get_logger().info(
-    f"v={self.v:.2f}, w={self.omega:.2f} | "
-    f"H={score_heading:.2f}, C={score_clearance:.2f}, V={score_velocity:.2f}, S={score_smooth:.2f} "
-    f"=> Total={score:.2f}"
-)
+#                 self.get_logger().info(
+#     f"v={self.v:.2f}, w={self.omega:.2f} | "
+#     f"H={score_heading:.2f}, C={score_clearance:.2f}, V={score_velocity:.2f}, S={score_smooth:.2f} "
+#     f"=> Total={score:.2f}"
+# )
+
+                now = time.time()
+                if now - self.last_log_time > 1.0:   # print once per second
+                    self.get_logger().info(
+                        f"Selected v={best_v:.2f}, w={best_w:.2f} | "
+                        f"Heading={score_heading:.2f}, "
+                        f"Clearance={score_clearance:.2f}, "
+                        f"Velocity={score_velocity:.2f}, "
+                        f"Smooth={score_smooth:.2f} "
+                        f"=> Total={best_score:.2f}"
+                    )
+                    self.last_log_time = now
 
                 if score > best_score:
                     best_score, best_v, best_w, best_traj = score, float(v), float(w), traj
@@ -195,9 +219,10 @@ class DWAPlannerNode(Node):
         if candidates:
            
             candidates.sort(key=lambda x: x[1], reverse=True)
-            top_candidates = [traj for traj, _ in candidates[:10]]
+            top_candidates = [traj for traj, _ in candidates[:]]
             candidate_markers = make_candidate_markers(
-                    top_candidates, self.get_clock().now().to_msg(), frame_id="map" )
+                    top_candidates, self.get_clock().now().to_msg(), frame_id="map" 
+                    )
             self.candidate_pub.publish(candidate_markers)
 
         if best_traj:
