@@ -2,7 +2,7 @@ import math
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
 
-def make_goal_marker(goal, stamp, frame_id="odom"):
+def make_goal_marker(goal, stamp, frame_id="odom", color=(1.0, 0.0, 0.0, 1.0)):
     gx, gy, gyaw = goal
     marker = Marker()
     marker.header.frame_id = frame_id
@@ -15,8 +15,8 @@ def make_goal_marker(goal, stamp, frame_id="odom"):
     marker.pose.position.y = gy
     marker.pose.orientation.z = math.sin(gyaw * 0.5)
     marker.pose.orientation.w = math.cos(gyaw * 0.5)
-    marker.scale.x, marker.scale.y, marker.scale.z = 1.0, 0.15, 0.2
-    marker.color.a, marker.color.g = 1.0, 1.0
+    marker.scale.x, marker.scale.y, marker.scale.z = 1.2, 0.15, 0.2
+    marker.color.r, marker.color.g, marker.color.b, marker.color.a = color
     return marker
 
 def make_path_marker(path_points, stamp, frame_id="odom"):

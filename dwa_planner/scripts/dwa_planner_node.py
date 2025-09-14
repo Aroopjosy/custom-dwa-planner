@@ -38,18 +38,18 @@ class DWAPlannerNode(Node):
         self.v_min         = 0.0
         self.omega_max     =  2.84 #1.82
         self.omega_min     = -2.84 #-1.82
-        self.a_max         = 2.5
+        self.a_max         = 1.5
         self.alpha_max     = 2.5
         self.robot_radius  = 0.15
         self.safety_margin = 0.10
         self.effective_radius = self.robot_radius + self.safety_margin
 
         # --- DWA Parameters ---
-        self.dt_control   = 0.2
-        self.dt_sim       = 0.1
+        self.dt_control   = 0.1
+        self.dt_sim       = 0.2
         self.predict_time = 3.0
-        self.v_samples    = 7
-        self.w_samples    = 5
+        self.v_samples    = 5
+        self.w_samples    = 7
 
         # --- Weights (all positive, features normalized 0..1) ---
 
@@ -140,9 +140,11 @@ class DWAPlannerNode(Node):
         dist_err = math.hypot(gx - self.x, gy - self.y)
         # Orientation error
         yaw_err = math.atan2(math.sin(gyaw - self.yaw), math.cos(gyaw - self.yaw))
-        if dist_err < self.goal_tolerance: #and abs(yaw_err) < self.yaw_tolerance:
+        if dist_err < self.goal_tolerance :#and abs(yaw_err) < self.yaw_tolerance:
             self.cmd_pub.publish(Twist())
             self.prev_v, self.prev_w = 0.0, 0.0
+            marker =  make_goal_marker(self.goal, self.get_clock().now().to_msg(), frame_id="map", color=(0.0, 1.0, 0.0, 1.0))
+            self.goal_pub.publish(marker)
             self.get_logger().info("🏁 Goal Reached.")
             return
 
@@ -174,6 +176,8 @@ class DWAPlannerNode(Node):
                 score_smooth    = self.w_smooth * path_smoothness_score(v, w, self.prev_v, self.prev_w, self.v_max, self.omega_max)
 
                 score = score_heading + score_clearance + score_velocity + score_smooth
+
+                score += 0.001 * w
 
                 candidates.append((traj, score))
 
