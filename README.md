@@ -46,5 +46,10 @@ ros2 launch dwa_planner dwa_map.launch.py
 ```
 ## 6. Give Goal location
 
-* click '2D Goal pose' and drag it in empty place
+* click `2D Goal pose` and drag it in empty place
   
+## 🎯 Goal Reached Indicator
+
+* When the robot successfully reaches the target position,
+the **goal arrow in RViz automatically changes its color to green**,
+giving you a clear visual confirmation of success. ✅
