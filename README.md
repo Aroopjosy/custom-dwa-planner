@@ -38,24 +38,13 @@ In a new terminal:
 ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py
 
 ```
-    
-
-## 5. Run the DWA Planner Node
+## 5. Launch DWA planner node, rviz
 In another terminal:
 
 ```
-ros2 run dwa_planner dwa_planner_node.py
+ros2 launch dwa_planner dwa_map.launch.py
 ```
- **Recommended goal position**
- * `goal X = 2`
- * `goal y = 1`
+## 6. Give Goal location
 
-
-## 6. Visualize in RViz
-```
-rviz2
-```
-Then:
-* Click the **Add** button
-* Select **By topic**
-* Choose the **Marker** topic to visualize the planning output
+* click '2D Goal pose' and drag it in empty place
+  

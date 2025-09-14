@@ -38,7 +38,7 @@ class DWAPlannerNode(Node):
         self.v_min         = 0.0
         self.omega_max     =  2.84 #1.82
         self.omega_min     = -2.84 #-1.82
-        self.a_max         = 1.5
+        self.a_max         = 1.0
         self.alpha_max     = 2.5
         self.robot_radius  = 0.15
         self.safety_margin = 0.10
@@ -145,7 +145,7 @@ class DWAPlannerNode(Node):
             self.prev_v, self.prev_w = 0.0, 0.0
             marker =  make_goal_marker(self.goal, self.get_clock().now().to_msg(), frame_id="map", color=(0.0, 1.0, 0.0, 1.0))
             self.goal_pub.publish(marker)
-            self.get_logger().info("🏁 Goal Reached.")
+            self.get_logger().debug("🏁 Goal Reached.")
             return
 
         # 1) Dynamic Window

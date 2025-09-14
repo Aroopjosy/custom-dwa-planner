@@ -46,12 +46,12 @@ def generate_launch_description():
         #     }]
         # ),
         # === DWA Planner Node ===
-        # Node(
-        #     package="dwa_planner",
-        #     executable="dwa_planner_node.py",   # change if your executable name differs
-        #     name="dwa_planner",
-        #     output="screen"
-        # ),
+        Node(
+            package="dwa_planner",
+            executable="dwa_planner_node.py",   # change if your executable name differs
+            name="dwa_planner",
+            output="screen"
+        ),
 
         # === Map Server ===
         # Node(
