@@ -46,7 +46,9 @@ ros2 launch dwa_planner dwa_map.launch.py
 ```
 ## 6. Give Goal location
 
-* click `2D Goal pose` and drag it in empty place
+* click `2D Goal pose` and drag to set open area of the map,
+  
+✨ Now your TurtleBot3 is started to navigate using the custom DWA local planner!
   
 ## 🎯 Goal Reached Indicator
 
