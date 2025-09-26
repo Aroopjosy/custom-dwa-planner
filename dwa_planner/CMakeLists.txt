@@ -25,9 +25,7 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   scripts/dwa_planner_node.py
-  scripts/dwa_node.py
-  scripts/new_dwa_planner.py
-  DESTINATION lib/${PROJECT_NAME}
+    DESTINATION lib/${PROJECT_NAME}
 )
 
 

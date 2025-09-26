@@ -47,7 +47,7 @@ class DWAPlannerNode(Node):
         # --- DWA Parameters ---
         self.dt_control   = 0.1
         self.dt_sim       = 0.2
-        self.predict_time = 3.0
+        self.predict_time = 2.0
         self.v_samples    = 5
         self.w_samples    = 7
 
@@ -181,13 +181,6 @@ class DWAPlannerNode(Node):
 
                 candidates.append((traj, score))
 
-
-#                 self.get_logger().info(
-#     f"v={self.v:.2f}, w={self.omega:.2f} | "
-#     f"H={score_heading:.2f}, C={score_clearance:.2f}, V={score_velocity:.2f}, S={score_smooth:.2f} "
-#     f"=> Total={score:.2f}"
-# )
-
                 now = time.time()
                 if now - self.last_log_time > 1.0:   # print once per second
                     self.get_logger().info(
@@ -213,9 +206,6 @@ class DWAPlannerNode(Node):
 
             self.prev_v, self.prev_w = best_v, best_w
 
-        # cmd.linear.x = best_v
-        # cmd.angular.z = best_w
-        # self.prev_v, self.prev_w = best_v, best_w
         self.cmd_pub.publish(cmd)
 
         best_traj = simulate_trajectory(self.x, self.y, self.yaw, best_v, best_w, self.dt_sim, self.predict_time)
